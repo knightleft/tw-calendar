@@ -1,8 +1,9 @@
 'use strict';
 
 /* ============================================================
- * 跨裝置同步：把資料存成「一個資料夾」，放在 Google Drive 電腦版的同步資料夾裡，
- * 每台電腦都選同一個資料夾，Google Drive 負責把檔案送到另一台。
+ * 跨裝置同步：把資料存成「一個資料夾」的檔案，有兩種放法（上面的邏輯完全共用）：
+ *  - 登入 Google 帳號（主要）：放在 Drive 的 appDataFolder（程式專用的隱藏空間），做成跟資料夾一樣的介面（driveDir）
+ *  - 本機資料夾（進階）：每台電腦都選同一個 Google Drive 電腦版的同步資料夾，由 Drive 負責把檔案送到另一台
  *  - calendar-data.json：所有 tw_cal_ 開頭的設定與資料（原樣的字串）＋ savedAt（最後寫入時間）
  *  - thumbs/<id>.jpg：直播紀錄的截圖（IndexedDB 裡的 Blob）
  * 不同步：Twitch 憑證（每台各自登入）、頁籤與面板開合（每台自己的操作習慣）、同步用的暫存鍵 tw_cal_sync_*。
@@ -123,7 +124,8 @@ async function syncPull(dir, mf) {
       if (!cur || cur.size !== f.size) thumbs.push([e.id, f]);
     }
   }
-  for (const [id, f] of thumbs) await idbOp('readwrite', (s) => s.put(f, id));
+  // 資料夾的 File 本身就是 Blob；Google Drive 的是延遲下載的物件（先看大小，要用才抓）
+  for (const [id, f] of thumbs) { const data = f instanceof Blob ? f : await f.blob(); await idbOp('readwrite', (s) => s.put(data, id)); }
   syncKeys().filter((k) => !(k in mf.data)).forEach((k) => rawRemove.call(localStorage, k));
   Object.entries(mf.data).forEach(([k, v]) => { if (syncable(k) && typeof v === 'string') rawSet.call(localStorage, k, v); });
   rawSet.call(localStorage, KEY.syncLast, String(mf.savedAt));
@@ -163,7 +165,8 @@ async function syncRun() {
     else syncPaint('ok', last);
     return true;
   } catch (e) {
-    syncPaint('error', e && e.message ? e.message : String(e));
+    if (e && e.need) syncPaint('need');
+    else syncPaint('error', e && e.message ? e.message : String(e));
     return false;
   } finally {
     sync.busy = false;
@@ -186,16 +189,110 @@ function syncPaint(status, extra) {
   if (isModalOpen('syncModal')) fillSyncModal();
 }
 
+// ── Google Drive（登入帳號）：做成跟資料夾一樣的介面，上面的寫出／套用邏輯完全共用 ──────────
+// 檔案放在 appDataFolder（程式專用的隱藏空間，沒有子資料夾，所以 thumbs/ 就是檔名前綴）
+const drv = { token: '', exp: 0, list: null };
+const driveMissing = () => { const e = new Error('not found'); e.name = 'NotFoundError'; return e; };
+const driveNeed = () => { const e = new Error('需要重新登入 Google'); e.need = true; return e; };
+const gsiReady = () => !!(window.google && google.accounts && google.accounts.oauth2);
+let gsiLoading = null;
+function loadGsi() {
+  if (gsiReady()) return Promise.resolve(true);
+  return gsiLoading || (gsiLoading = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+    s.onload = () => resolve(true);
+    s.onerror = () => { gsiLoading = null; s.remove(); resolve(false); };
+    document.head.appendChild(s);
+  }));
+}
+// prompt='none'：不跳任何視窗，能靜默續期就給（失敗＝要使用者點一下）；''：必要時才跳登入／同意視窗（要在點擊當下呼叫，不然會被瀏覽器擋）
+function gsiRequest(prompt) {
+  return new Promise((resolve) => {
+    if (!gsiReady()) { resolve(false); return; }
+    let done = false, timer = 0;
+    const finish = (r) => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (r && r.access_token) { drv.token = r.access_token; drv.exp = Date.now() + (Number(r.expires_in) || 3600) * 1000; resolve(true); } else resolve(false);
+    };
+    timer = setTimeout(() => finish(null), prompt === 'none' ? 8000 : 120000);
+    google.accounts.oauth2.initTokenClient({ client_id: GOOGLE_CLIENT_ID, scope: GOOGLE_SCOPE, callback: finish, error_callback: () => finish(null) }).requestAccessToken({ prompt });
+  });
+}
+async function driveToken() {
+  if (drv.token && Date.now() < drv.exp - 60000) return true;
+  await loadGsi();
+  return gsiRequest('none');
+}
+async function driveFetch(url, opts = {}, retry = true) {
+  if (!(await driveToken())) throw driveNeed();
+  const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + drv.token } });
+  if (r.status === 401 && retry) { drv.token = ''; return driveFetch(url, opts, false); }
+  if (!r.ok) throw new Error(`Google Drive 回應 ${r.status}`);
+  return r;
+}
+const DRIVE_FIELDS = 'id,name,size,modifiedTime';
+// 一輪同步只列一次檔案，之後的寫入／刪除自己更新這份清單；同名重複（兩台同時第一次建檔）取最新的
+async function driveList() {
+  if (drv.list) return drv.list;
+  const m = new Map();
+  let page = '';
+  do {
+    const j = await (await driveFetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&pageSize=1000&fields=nextPageToken,files(${DRIVE_FIELDS})${page ? '&pageToken=' + encodeURIComponent(page) : ''}`)).json();
+    for (const f of j.files || []) { const old = m.get(f.name); if (!old || f.modifiedTime > old.modifiedTime) m.set(f.name, f); }
+    page = j.nextPageToken || '';
+  } while (page);
+  return (drv.list = m);
+}
+async function driveSave(name, data) {
+  const list = await driveList();
+  let f = list.get(name);
+  if (!f) {
+    f = await (await driveFetch(`https://www.googleapis.com/drive/v3/files?fields=${DRIVE_FIELDS}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, parents: ['appDataFolder'] }) })).json();
+    list.set(name, f);
+  }
+  list.set(name, await (await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${f.id}?uploadType=media&fields=${DRIVE_FIELDS}`, { method: 'PATCH', headers: { 'Content-Type': 'application/octet-stream' }, body: data })).json());
+}
+function driveDir(prefix = '') {
+  const media = (f) => `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`;
+  return {
+    isDrive: true, name: 'Google Drive',
+    async queryPermission() { drv.list = null; return (await driveToken()) ? 'granted' : 'prompt'; },
+    requestPermission() { return gsiRequest('').then((ok) => (ok ? 'granted' : 'denied')); },
+    async getFileHandle(n, o) {
+      const full = prefix + n;
+      if (!(await driveList()).has(full) && !(o && o.create)) throw driveMissing();
+      return {
+        async getFile() {
+          const f = (await driveList()).get(full);
+          if (!f) throw driveMissing();
+          return { size: Number(f.size || 0), text: async () => (await driveFetch(media(f))).text(), blob: async () => (await driveFetch(media(f))).blob() };
+        },
+        async createWritable() { let buf; return { async write(x) { buf = x; }, async close() { await driveSave(full, buf); } }; },
+      };
+    },
+    async getDirectoryHandle(n) { return driveDir(prefix + n + '/'); },
+    async removeEntry(n) {
+      const list = await driveList(), f = list.get(prefix + n);
+      if (f) { await driveFetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, { method: 'DELETE' }); list.delete(prefix + n); }
+    },
+    async *entries() { for (const k of (await driveList()).keys()) if (k.startsWith(prefix)) yield [k.slice(prefix.length), {}]; },
+  };
+}
+
 // ── 設定視窗 ───────────────────────────────────────────────
 const syncSupported = () => typeof window.showDirectoryPicker === 'function';
 function fillSyncModal() {
-  $('syncStatus').textContent = !syncSupported() ? '這個瀏覽器不支援（需要 Chrome 或 Edge）' : !sync.dir ? '尚未設定' : (sync.status === 'error' ? '同步失敗：' + sync.msg : sync.msg || '已連上資料夾');
-  $('syncFolder').textContent = sync.dir ? '資料夾：' + sync.dir.name : '';
-  $('btnSyncPick').disabled = !syncSupported();
-  $('btnSyncPick').textContent = sync.dir ? '改選別的資料夾' : '選擇同步資料夾';
+  const drive = !!(sync.dir && sync.dir.isDrive);
+  $('syncStatus').textContent = !sync.dir ? '尚未設定' : (sync.status === 'error' ? '同步失敗：' + sync.msg : sync.msg || '已連上');
+  $('syncFolder').textContent = !sync.dir ? '' : drive ? '同步位置：你的 Google Drive（程式專用的隱藏空間）' : '資料夾：' + sync.dir.name;
+  $('btnSyncGoogle').hidden = drive;
+  $('btnSyncPick').hidden = !syncSupported();
+  $('btnSyncPick').textContent = sync.dir && !drive ? '改選別的資料夾' : '改用資料夾同步（進階）';
   $('btnSyncNow').hidden = $('btnSyncStop').hidden = !sync.dir;
 }
-function openSyncModal() { fillSyncModal(); openModal('syncModal'); }
+function openSyncModal() { loadGsi(); fillSyncModal(); openModal('syncModal'); }
 
 // 資料夾的控制代碼存在 IndexedDB（可以直接存進去），重開瀏覽器後還找得到同一個資料夾
 let syncDbP = null;
@@ -219,21 +316,35 @@ async function pickSyncFolder() {
   try { dir = await window.showDirectoryPicker({ id: 'twcal-sync', mode: 'readwrite' }); }
   catch (e) { return; } // 使用者取消
   await syncKv('readwrite', (s) => s.put(dir, 'dir'));
+  rawSet.call(localStorage, KEY.syncMode, 'folder');
   sync.dir = dir;
-  // 換了資料夾＝跟那邊的歷史無關，當成第一次連上
+  syncStartFresh();
+}
+// 換了同步位置＝跟那邊的歷史無關，當成第一次連上（本機有資料而對方也有時會先問）
+async function syncStartFresh() {
   rawRemove.call(localStorage, KEY.syncLast);
   rawRemove.call(localStorage, KEY.syncThumbs);
+  drv.list = null;
   syncPaint('busy');
   await syncRun();
 }
+async function connectGoogle() {
+  // 登入視窗要在點擊當下開，所以元件要事先載好；還沒好就請使用者再按一次
+  if (!gsiReady()) { loadGsi(); toast('Google 登入元件載入中，請稍後再按一次（需要連上網路）'); return; }
+  if (!(await gsiRequest(''))) { toast('沒有登入成功'); return; }
+  await syncKv('readwrite', (s) => s.delete('dir')).catch(() => {});
+  rawSet.call(localStorage, KEY.syncMode, 'google');
+  sync.dir = driveDir('');
+  syncStartFresh();
+}
 async function stopSync() {
-  if (!confirm('停止同步？這台電腦上的資料會保留，只是不再跟資料夾同步（資料夾裡的檔案也不會刪）。')) return;
+  if (!confirm('停止同步？這台電腦上的資料會保留，只是不再同步（雲端或資料夾裡的檔案也不會刪）。')) return;
   clearTimeout(sync.timer);
-  await syncKv('readwrite', (s) => s.delete('dir'));
+  await syncKv('readwrite', (s) => s.delete('dir')).catch(() => {});
+  if (sync.dir && sync.dir.isDrive && drv.token && gsiReady()) google.accounts.oauth2.revoke(drv.token, () => {});
+  drv.token = ''; drv.list = null;
   sync.dir = null;
-  rawRemove.call(localStorage, KEY.syncLast);
-  rawRemove.call(localStorage, KEY.syncDirty);
-  rawRemove.call(localStorage, KEY.syncThumbs);
+  [KEY.syncMode, KEY.syncLast, KEY.syncDirty, KEY.syncThumbs].forEach((k) => rawRemove.call(localStorage, k));
   syncPaint('off');
   fillSyncModal();
 }
@@ -245,8 +356,8 @@ async function onSyncChip() {
 }
 
 async function syncInit() {
-  if (!syncSupported()) return;
-  try { sync.dir = await syncKv('readonly', (s) => s.get('dir')) || null; } catch (e) { sync.dir = null; }
+  if (loadRaw(KEY.syncMode) === 'google') { sync.dir = driveDir(''); loadGsi(); }
+  else if (syncSupported()) { try { sync.dir = await syncKv('readonly', (s) => s.get('dir')) || null; } catch (e) { sync.dir = null; } }
   if (!sync.dir) return;
   syncRun();
   // 回到這個分頁時看一下別台有沒有改：正在編輯（視窗開著）就先不動，免得畫面突然重載

@@ -242,12 +242,13 @@
 <div class="modal-overlay" id="syncModal">
   <div class="modal">
     <h2>☁ 跨裝置同步</h2>
-    <div class="hint hint-lead">每台電腦都選<b>同一個</b>資料夾，而且那個資料夾要在 Google Drive 電腦版的同步範圍內（例如「我的雲端硬碟」裡建一個「行事曆資料」）。之後在任一台修改，其他台打開就會是最新的；直播紀錄的截圖也會一起同步。</div>
-    <div class="hint">不會同步 Twitch 憑證（每台要各自設定一次）。需要 Chrome 或 Edge；瀏覽器重開後要點一下頂部的「☁」按鈕，才能再讀寫資料夾。</div>
+    <div class="hint hint-lead">登入 Google 帳號後，行程、設定與直播紀錄截圖會存到你自己 Google Drive 裡「這個程式專用的隱藏空間」（Drive 介面看不到，也不會動到你其他檔案）。每台電腦都登入<b>同一個</b> Google 帳號，在任一台修改，其他台打開就會是最新的。</div>
+    <div class="hint">不會同步 Twitch 憑證（每台要各自設定一次）。瀏覽器重開後偶爾要點一下頂部的「☁」按鈕重新連線。「進階」是改用 Google Drive 電腦版的本機資料夾（只有 Chrome／Edge）。</div>
     <div class="hint" id="syncStatus"></div>
     <div class="hint" id="syncFolder"></div>
     <div class="modal-actions">
-      <button class="btn btn-primary" id="btnSyncPick">選擇同步資料夾</button>
+      <button class="btn btn-primary" id="btnSyncGoogle">🔑 用 Google 帳號登入同步</button>
+      <button class="btn btn-ghost" id="btnSyncPick">改用資料夾同步（進階）</button>
       <button class="btn btn-ghost" id="btnSyncNow" hidden>立即同步</button>
       <button class="btn btn-ghost" id="btnSyncClose">關閉</button>
       <button class="btn btn-danger" id="btnSyncStop" hidden>停止同步</button>

@@ -9,7 +9,7 @@
 const DEFAULT_TITLE = '我的行事曆';
 // 版號規則：每做一次新調整 +0.01；只是釐清上個需求則不加；
 // 使用者確認定版後 +1 並將小數歸零（例：v0.07 → v1.00）
-const VERSION = 'v0.62';
+const VERSION = 'v0.63';
 
 // localStorage 鍵名
 const KEY = {
@@ -40,7 +40,13 @@ const KEY = {
   syncLast: 'tw_cal_sync_last',
   syncDirty: 'tw_cal_sync_dirty',
   syncThumbs: 'tw_cal_sync_thumbs',
+  syncMode: 'tw_cal_sync_mode', // 'google'（登入 Google 帳號）｜'folder'（本機資料夾）；沒有＝還沒設定
 };
+
+// Google 登入同步：用戶端 ID 是公開識別碼、不是密鑰，放在程式裡沒有安全問題（只有授權過的網站來源才能用）。
+// 範圍只要 drive.appdata：只能讀寫「這個程式專用的隱藏空間」，碰不到使用者 Drive 裡的其他檔案
+const GOOGLE_CLIENT_ID = '867188989861-rrqju4d83hdd8gtte7eo5psf93min23q.apps.googleusercontent.com';
+const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 
 const DOW_NAMES = ['日', '一', '二', '三', '四', '五', '六']; // 依 Date.getDay() 索引
 const DEFAULT_CAL_WIDTH = 1200;

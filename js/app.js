@@ -40,6 +40,7 @@ function bindSettingsMenu() {
   onClick('btnLbCancel', () => closeModal('logBatchModal'));
   closeOnBackdrop('logBatchModal', () => closeModal('logBatchModal'));
   onClick('btnSync', () => { setSettingsMenu(false); openSyncModal(); });
+  onClick('btnSyncGoogle', connectGoogle);
   onClick('btnSyncPick', pickSyncFolder);
   onClick('btnSyncNow', () => { syncRun(); });
   onClick('btnSyncStop', stopSync);

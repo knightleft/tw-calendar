@@ -1894,8 +1894,50 @@
     const bad = fakeDir(); await fsWrite(bad, SYNC_FILE, '不是 JSON'); sync.dir = bad;
     check('同步檔壞掉 → 報錯、不動本機資料', [await syncRun(), sync.status, localStorage.getItem(KEY.title)], [false, 'error', '本機再改']);
 
+    // 登入 Google：用假的 Drive API（appDataFolder）驗證「資料夾介面」的轉接層
+    { const store = new Map(), calls = [], realFetch = window.fetch; let seq = 0;
+      const J = (o) => new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } });
+      const meta = (f) => ({ id: f.id, name: f.name, size: String(f.blob.size), modifiedTime: f.t });
+      window.fetch = async (url, opts = {}) => {
+        const u = new URL(url), m = opts.method || 'GET', id = (u.pathname.match(/files\/([^/]+)$/) || [])[1];
+        calls.push(m + ' ' + u.pathname + u.search.replace(/&?fields=[^&]*/, ''));
+        if ((opts.headers || {}).Authorization !== 'Bearer tok') return new Response('', { status: 401 });
+        if (m === 'GET' && !id) return J({ files: [...store.values()].map(meta) });
+        if (m === 'GET' && u.searchParams.get('alt') === 'media') return new Response(store.get(id).blob);
+        if (m === 'POST') { const b = JSON.parse(opts.body), f = { id: 'f' + (++seq), name: b.name, blob: new Blob([]), t: new Date(1e12 + seq).toISOString(), parents: b.parents }; store.set(f.id, f); return J(meta(f)); }
+        if (m === 'PATCH') { const f = store.get(id); f.blob = new Blob([opts.body]); return J(meta(f)); }
+        if (m === 'DELETE') { store.delete(id); return new Response('', { status: 204 }); }
+        return new Response('', { status: 400 });
+      };
+      drv.token = 'tok'; drv.exp = Date.now() + 3600000; drv.list = null;
+      const G = driveDir(''); sync.dir = G;
+      localStorage.clear();
+      localStorage.setItem(KEY.streamLog, JSON.stringify([{ id: 'tdrv1', hasThumb: true, startedAt: '2026-10-02T10:00:00Z', title: 'd' }]));
+      localStorage.setItem(KEY.title, '雲端測試'); clearTimeout(sync.timer);
+      await thumbPut('tdrv1', new Blob(['12345'], { type: 'image/jpeg' })); clearTimeout(sync.timer);
+      check('Google：寫出 → 檔案進程式專用空間（appDataFolder），縮圖用 thumbs/ 前綴', [await syncRun(), [...store.values()].map((f) => f.name).sort(), [...store.values()].every((f) => f.parents[0] === 'appDataFolder')], [true, ['calendar-data.json', 'thumbs/tdrv1.jpg'], true]);
+      const savedMf = JSON.parse(await [...store.values()].find((f) => f.name === SYNC_FILE).blob.text());
+      check('Google：主檔內容正確（含資料、不含 Twitch 憑證）', [savedMf.data[KEY.title], KEY.twitch in savedMf.data], ['雲端測試', false]);
+      // 另一台：本機清空後套用，縮圖要抓下來；之後本機已有同樣大小的縮圖，就不該再抓
+      await thumbDel('tdrv1'); localStorage.clear(); drv.list = null; calls.length = 0;
+      const reloadsBefore = reloads.length; await syncRun();
+      check('Google：另一台套用 → 資料與縮圖回來、重新載入', [localStorage.getItem(KEY.title), (await thumbGet('tdrv1') || {}).size, reloads.length - reloadsBefore], ['雲端測試', 5, 1]);
+      const dl = () => calls.filter((c) => c.includes('alt=media')).length;
+      check('Google：套用時只下載主檔與缺的縮圖（2 次）', dl(), 2);
+      localStorage.setItem(KEY.syncLast, String(savedMf.savedAt - 1)); localStorage.setItem(KEY.syncDirty, '0'); drv.list = null; calls.length = 0;
+      await syncRun();
+      check('Google：本機縮圖大小相同 → 不重抓（只下載主檔 1 次）', dl(), 1);
+      // 改本機 → 寫回：只更新主檔（同一個檔案 PATCH），不會多出重複檔
+      localStorage.setItem(KEY.title, '雲端改過'); clearTimeout(sync.timer); drv.list = null; calls.length = 0;
+      await syncRun();
+      check('Google：再寫出 → 不產生重複檔、主檔更新', [[...store.values()].filter((f) => f.name === SYNC_FILE).length, JSON.parse(await [...store.values()].find((f) => f.name === SYNC_FILE).blob.text()).data[KEY.title]], [1, '雲端改過']);
+      // 登入過期：回 401 → 重新要權杖；要不到就是「需要點一下」，不報錯
+      drv.token = 'old'; drv.exp = Date.now() + 3600000; drv.list = null; const keepGsi = window.google, keepLoad = window.loadGsi; window.google = undefined; window.loadGsi = async () => false;
+      check('Google：權杖失效又無法靜默續期 → 狀態是「需要點一下」', [await syncRun(), sync.status], [false, 'need']);
+      window.google = keepGsi; window.loadGsi = keepLoad; window.fetch = realFetch; drv.token = ''; drv.list = null; }
+
     clearTimeout(sync.timer); syncPaint('off'); Object.assign(sync, { dir: keepSync.dir, reload: keepSync.reload }); window.confirm = keepSync.confirm;
-    await thumbDel('tsync1').catch(() => {}); }
+    await thumbDel('tsync1').catch(() => {}); await thumbDel('tdrv1').catch(() => {}); }
 
   localStorage.clear();
   return { passed, failed };
