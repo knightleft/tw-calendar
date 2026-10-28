@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的行事曆</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="topbar">
+  <div class="title-wrap">
+    <input id="titleInput" type="text" placeholder="輸入標題…" />
+    <span id="versionTag" class="version-tag" title="版本"></span>
+  </div>
+  <div class="tb-group">
+    <div class="fd-mode-tabs scope-tabs">
+      <button class="fd-mode-tab active" id="scopeMain" type="button" title="私人行程：年度總覽與月視圖">📅 私人行程</button>
+      <button class="fd-mode-tab" id="scopeStream" type="button" title="直播行程：年度總覽、週曆、月曆（有自己的行程）">📺 直播行程</button>
+    </div>
+    <button class="topbar-btn primary" id="btnShot" title="截圖目前這個畫面">📷 截圖</button>
+  </div>
+  <div class="tb-group">
+    <button class="topbar-btn" id="btnImport" title="從備份檔匯入行程">📥 匯入</button>
+    <button class="topbar-btn" id="btnExport" title="把行程存成備份檔">📤 匯出</button>
+    <input type="file" id="importFile" accept=".json" hidden />
+  </div>
+  <div class="tb-group">
+    <button class="topbar-btn icon-btn" id="btnTheme" type="button" title="切換亮色／暗色底板"></button>
+    <label class="width-ctl" title="日曆寬度（也會套用到截圖與直播預覽）">
+      <span>↔ 寬度</span>
+      <input type="range" id="widthSlider" min="480" max="1600" step="20" value="1200" />
+      <span id="widthVal">1200px</span>
+    </label>
+  </div>
+  <button class="topbar-btn" id="syncChip" type="button" hidden></button>
+  <div class="tb-menu">
+    <button class="topbar-btn" id="btnSettings" type="button" aria-haspopup="true" aria-expanded="false">⚙ 設定</button>
+    <div id="settingsMenu" class="menu-pop" hidden>
+      <div class="menu-row"><span>背景與配色</span><button class="topbar-btn" id="btnBg" type="button">🎨 設定背景</button></div>
+      <label class="menu-row"><span>每週第一天</span>
+        <select id="weekStart">
+          <option value="1">週一</option>
+          <option value="0">週日</option>
+        </select>
+      </label>
+      <div class="menu-row"><span>直播行程的社群</span><button class="topbar-btn" id="btnSocial" type="button">🔗 社群帳號</button></div>
+      <div class="menu-row"><span>跨裝置同步</span><button class="topbar-btn" id="btnSync" type="button">☁ Google Drive</button></div>
+      <div class="menu-row"><span>直播紀錄同步</span><button class="topbar-btn" id="btnTwitchSet" type="button">⚙ Twitch 設定</button></div>
+      <label class="menu-row" title="填寫時一律為 24 小時制，這裡只影響顯示"><span>時間顯示</span>
+        <select id="timeFmt">
+          <option value="24">24 小時</option>
+          <option value="12">12 小時</option>
+        </select>
+      </label>
+    </div>
+  </div>
+</div>
+
+<div id="yearView">
+  <div id="bgPreview">
+    <div id="yearTitle"></div>
+    <div id="yearNav">
+      <button class="year-nav-btn" data-html2canvas-ignore="true" id="yearPrev" aria-label="上一年">←</button>
+      <span id="yearLabel"></span>
+      <button class="year-nav-btn" data-html2canvas-ignore="true" id="yearNext" aria-label="下一年">→</button>
+    </div>
+    <div class="year-grid" id="yearGrid"></div>
+  </div>
+</div>
+
+<div id="monthView">
+  <div id="bgMonthPreview">
+    <div id="monthViewHeader">
+      <button class="topbar-btn" id="btnBackYear" data-html2canvas-ignore="true">← 年度總覽</button>
+      <button class="year-nav-btn" data-html2canvas-ignore="true" id="monthPrev" aria-label="上個月">←</button>
+      <div id="monthViewTitle"></div>
+      <button class="year-nav-btn" data-html2canvas-ignore="true" id="monthNext" aria-label="下個月">→</button>
+      <button class="topbar-btn" id="monthToday" data-html2canvas-ignore="true">今天</button>
+      <button class="topbar-btn" id="btnFree" data-html2canvas-ignore="true" title="列出沒有行程的日期，方便跟別人約時間">📋 輸出空檔日期</button>
+    </div>
+    <div class="month-full-cal" id="monthFullCal"></div>
+  </div>
+</div>
+
+<div id="streamView">
+  <div id="streamLayout">
+    <aside id="streamPanel" aria-label="直播行程版面設定">
+      <div id="spHead">
+        <strong>⚙ 直播行程版面設定</strong>
+        <button class="color-tab small" id="ssReset" type="button" title="把外觀還原成預設（不影響行程與每天的設定）">還原預設</button>
+      </div>
+      <div class="hint">改了就立刻套用，不用按確定。</div>
+      <div id="ssBody"></div>
+      <div id="spFoot">
+        <button class="btn btn-danger btn-block" id="stClear" type="button" title="清空直播行程（私人行程不受影響）">🗑 清空直播行程</button>
+      </div>
+    </aside>
+    <div id="streamMain">
+      <div id="streamBar">
+        <div class="fd-mode-tabs st-tabs">
+          <button class="fd-mode-tab" id="stYear" type="button">年度總覽</button>
+          <button class="fd-mode-tab active" id="stWeek" type="button">週曆</button>
+          <button class="fd-mode-tab" id="stMonth" type="button">月曆</button>
+          <button class="fd-mode-tab" id="stLog" type="button" title="記下每場直播，整年回顧並可截圖輸出">年度直播回顧</button>
+        </div>
+        <button class="year-nav-btn" id="stPrev" type="button" aria-label="上一個">←</button>
+        <button class="topbar-btn" id="stToday" type="button">今天</button>
+        <button class="year-nav-btn" id="stNext" type="button" aria-label="下一個">→</button>
+        <button class="topbar-btn st-right" id="stImport" type="button">➕ 從私人行程加入</button>
+        <button class="topbar-btn" id="stSettings" type="button" title="顯示／收合左側的版面設定面板">⚙ 版面設定</button>
+        <button class="topbar-btn" id="stSync" type="button" title="讀取 Twitch 正在直播的狀態與最近的 VOD" hidden>🔄 同步 Twitch</button>
+        <button class="topbar-btn" id="stLogAdd" type="button" hidden>＋ 新增紀錄</button>
+        <button class="topbar-btn" id="stLogToCal" type="button" title="把直播紀錄一次加進私人行程／直播行程" hidden>📅 加進行事曆</button>
+      </div>
+  <div id="streamStage"><div id="streamScaler">
+  <div id="bgStreamPreview">
+    <div id="streamBgLayer" hidden></div>
+    <div id="streamHead">
+      <div id="streamAvatarWrap" hidden><img id="streamAvatar" alt=""></div>
+      <div id="streamHeadText">
+        <div id="streamTitle"></div>
+        <div id="streamEyebrow"></div>
+        <div id="streamHandle" hidden></div>
+      </div>
+    </div>
+    <div id="streamTz"></div>
+    <div id="streamPeriod"></div>
+    <div id="streamYear" class="year-grid stream-year" hidden></div>
+    <div id="streamWeek" class="stream-week"></div>
+    <div id="streamMonth" class="month-full-cal stream-month" hidden></div>
+    <div id="streamSocials" hidden></div>
+    <div id="streamHint" class="stream-hint" data-html2canvas-ignore="true" hidden>直播行程目前是空的。按上方「📥 從私人行程匯入」，把私人行程裡想放進直播的行程丟進來。（這段提示不會出現在截圖裡）</div>
+    <div id="streamFoot" hidden></div>
+  </div>
+  </div></div>
+    <div id="logStage" hidden><div id="logScaler"><div id="streamLog"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 直播紀錄：新增／編輯 -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal">
+    <h2 id="logModalTitle">新增直播紀錄</h2>
+    <div class="form-group">
+      <label for="logTitle">直播標題</label>
+      <input type="text" id="logTitle" />
+    </div>
+    <div class="form-group">
+      <label for="logGame">開了什麼台（遊戲／分類，可以多個）</label>
+      <div class="tag-field">
+        <span id="logGameChips" class="tag-chips"></span>
+        <input type="text" id="logGame" autocomplete="off" placeholder="輸入後按 Enter；留空＝用標題開頭【】的字" />
+      </div>
+      <div id="logGameSuggestWrap">
+        <div class="hint">過去填過的（點一下加入）</div>
+        <div id="logGameSuggest" class="tag-sugg-row"></div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="logDate">開播日期</label>
+        <input type="date" id="logDate" />
+      </div>
+      <div class="form-group">
+        <label for="logTime">開播時間</label>
+        <input type="time" id="logTime" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="logDur">直播時長（時:分:秒，選填）</label>
+        <input type="text" id="logDur" inputmode="numeric" placeholder="例：3:08:33" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label for="logUrl">VOD／影片連結（選填）</label>
+        <input type="text" id="logUrl" />
+      </div>
+    </div>
+    <div class="form-group" id="logShotZone">
+      <label>截圖（選填，可以直接把圖片拖進來）</label>
+      <img id="logShotPrev" class="log-shot-prev" alt="" hidden />
+      <div class="modal-actions modal-actions-inline">
+        <button class="btn btn-ghost" id="logShotPick" type="button">選擇圖片</button>
+        <button class="btn btn-ghost" id="logShotClear" type="button" hidden>移除截圖</button>
+        <input type="file" id="logShotFile" accept="image/*" hidden />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>也加進行事曆（選填，會套用「實況」類別）</label>
+      <label class="check-line"><input type="checkbox" id="logToMain" /> 私人行程 <span class="hint" id="logToMainNote"></span></label>
+      <label class="check-line"><input type="checkbox" id="logToStream" /> 直播行程 <span class="hint" id="logToStreamNote"></span></label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnSaveLog">儲存</button>
+      <button class="btn btn-ghost" id="btnCancelLog">取消</button>
+      <button class="btn btn-danger" id="btnDeleteLog" hidden>刪除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 直播紀錄：批次加進行事曆 -->
+<div class="modal-overlay" id="logBatchModal">
+  <div class="modal modal-narrow">
+    <h2>📅 把直播紀錄加進行事曆</h2>
+    <div class="hint hint-lead">一次把紀錄變成行程（套用「實況」類別，標題照紀錄原樣）。已經加過的會略過，不會重複，也不會動到你改過的行程。</div>
+    <div class="form-group">
+      <label for="lbScope">哪些紀錄</label>
+      <select id="lbScope"></select>
+    </div>
+    <div class="form-group">
+      <label>加到</label>
+      <label class="check-line"><input type="checkbox" id="lbMain" /> 私人行程</label>
+      <label class="check-line"><input type="checkbox" id="lbStream" /> 直播行程</label>
+    </div>
+    <div class="form-group">
+      <label class="check-line"><input type="checkbox" id="lbAuto" /> 之後新增、同步到的紀錄也自動加入（用上面勾的）</label>
+    </div>
+    <div class="hint" id="lbCount"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnLbDo">加入</button>
+      <button class="btn btn-ghost" id="btnLbCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 直播行程的社群帳號 -->
+<div class="modal-overlay" id="socialModal">
+  <div class="modal">
+    <h2>🔗 社群帳號</h2>
+    <div class="hint hint-lead">帳號只要在這裡填一次（留空＝不顯示）。直播行程的「⚙ 版面設定」再勾選要顯示哪些。</div>
+    <div id="socialBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnSocialSave">儲存</button>
+      <button class="btn btn-ghost" id="btnSocialCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 跨裝置同步 -->
+<div class="modal-overlay" id="syncModal">
+  <div class="modal">
+    <h2>☁ 跨裝置同步</h2>
+    <div class="hint hint-lead">每台電腦都選<b>同一個</b>資料夾，而且那個資料夾要在 Google Drive 電腦版的同步範圍內（例如「我的雲端硬碟」裡建一個「行事曆資料」）。之後在任一台修改，其他台打開就會是最新的；直播紀錄的截圖也會一起同步。</div>
+    <div class="hint">不會同步 Twitch 憑證（每台要各自設定一次）。需要 Chrome 或 Edge；瀏覽器重開後要點一下頂部的「☁」按鈕，才能再讀寫資料夾。</div>
+    <div class="hint" id="syncStatus"></div>
+    <div class="hint" id="syncFolder"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnSyncPick">選擇同步資料夾</button>
+      <button class="btn btn-ghost" id="btnSyncNow" hidden>立即同步</button>
+      <button class="btn btn-ghost" id="btnSyncClose">關閉</button>
+      <button class="btn btn-danger" id="btnSyncStop" hidden>停止同步</button>
+    </div>
+  </div>
+</div>
+
+<!-- Twitch 設定 -->
+<div class="modal-overlay" id="twitchModal">
+  <div class="modal">
+    <h2>⚙ Twitch 同步設定</h2>
+    <div class="hint hint-lead">填好之後，按「同步」會讀取你的頻道「正在直播的狀態」與「最近的 VOD」（Twitch 只保留 7 天），存成直播紀錄。憑證只存在這台電腦的瀏覽器裡，不會傳到別的地方。</div>
+    <div class="form-group">
+      <label for="twLogin">你的 Twitch 帳號（網址最後那段）</label>
+      <input type="text" id="twLogin" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label for="twClientId">Client ID</label>
+      <input type="text" id="twClientId" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label for="twSecret">Client Secret</label>
+      <input type="password" id="twSecret" autocomplete="off" placeholder="已有憑證時可以留空" />
+      <div class="hint">只在換取存取憑證時用一次，不會存起來。憑證約 60 天到期，到期後再填一次 Secret、按「儲存並同步」即可。</div>
+      <div class="hint">到 <a href="https://dev.twitch.tv/console/apps" target="_blank" rel="noopener">dev.twitch.tv/console/apps</a> 註冊一個應用程式：「OAuth 重新導向網址」填 <b>http://localhost</b>（或 https://localhost，我們不會用到它）、類別選 Website Integration 或 Other、用戶端類型選 Confidential。建立後可以看到 Client ID，按「新密碼」會產生 Client Secret（只會顯示一次，請別截圖或貼給別人）。</div>
+    </div>
+    <div class="hint" id="twLast"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnTwSave">儲存並同步</button>
+      <button class="btn btn-ghost" id="btnTwCancel">取消</button>
+      <button class="btn btn-danger" id="btnTwClear">清除設定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 行程 Modal -->
+<div class="modal-overlay" id="eventModal">
+  <div class="modal">
+    <h2 id="eventModalTitle">新增行程</h2>
+    <div class="form-group">
+      <label for="evTitle">標題</label>
+      <input type="text" id="evTitle" placeholder="標題" />
+      <div class="name-preview" id="namePreview"></div>
+    </div>
+    <div class="form-group">
+      <label class="label-row"><span>類別（選了會套用該類別的顏色）</span>
+        <button type="button" class="color-tab small" id="btnManageCat">⚙ 管理類別</button></label>
+      <div class="cat-chips" id="catChips"></div>
+    </div>
+    <div class="form-group trpg-box" id="trpgFields" hidden>
+      <label>TRPG 資訊（填了就以下方樣式顯示，標題可留空）</label>
+      <div class="trpg-grid">
+        <input type="text" id="trpgGm" placeholder="GM" />
+        <div class="combo">
+          <input type="text" id="trpgSystem" placeholder="系統" autocomplete="off" />
+          <button type="button" class="combo-btn" id="btnSysDrop" aria-label="選擇填寫過的系統">▾</button>
+          <div class="sys-panel" id="sysPanel" hidden></div>
+        </div>
+      </div>
+      <input type="text" id="trpgScript" placeholder="劇本名" />
+      <div class="trpg-preview" id="trpgPreview"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="evStart">開始日</label>
+        <input type="date" id="evStart" />
+      </div>
+      <div class="form-group">
+        <label for="evEnd">結束日</label>
+        <input type="date" id="evEnd" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>時間（選填，留空＝全天）</label>
+      <div class="time-row">
+        <div class="time-pick" id="evStartTime" role="group" aria-label="開始時間（24 小時制）"></div>
+        <span>～</span>
+        <div class="time-pick" id="evEndTime" role="group" aria-label="結束時間（24 小時制）"></div>
+      </div>
+      <label class="check-line">
+        <input type="checkbox" id="evNoBlock" />
+        <span>不影響空檔（只是記錄，不一定每天出席）</span>
+      </label>
+    </div>
+    <div class="form-group">
+      <label for="evPeople">同行者（選填，一行填一人）</label>
+      <textarea id="evPeople" class="people-input" rows="2"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="evMemo" id="lblMemo">備註</label>
+      <textarea id="evMemo" placeholder="詳細備註…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>顏色</label>
+      <div class="color-mode-tabs">
+        <button class="color-tab active" id="tabSolid" type="button">單色</button>
+        <button class="color-tab" id="tabGrad" type="button">雙色漸層</button>
+      </div>
+      <div class="color-pickers">
+        <div class="color-swatch-wrap">
+          <input type="color" id="evColor1" value="#f08aa8" />
+          <label>顏色 1</label>
+        </div>
+        <div class="color-swatch-wrap" id="color2Wrap" hidden>
+          <input type="color" id="evColor2" value="#d9547e" />
+          <label>顏色 2</label>
+        </div>
+        <div class="gradient-preview" id="colorPreview"></div>
+      </div>
+      <div class="color-history-label">最近使用（點擊套用）</div>
+      <div class="color-history-row" id="colorHistoryRow"></div>
+    </div>
+    <div class="form-group" id="syncGroup">
+      <label class="check-line">
+        <input type="checkbox" id="evSync" />
+        <span id="lblSync">同步到直播行程</span>
+      </label>
+      <div class="hint" id="syncHint"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnSaveEv">儲存</button>
+      <button class="btn btn-ghost" id="btnCancelEv">取消</button>
+      <button class="btn btn-ghost" id="btnCopyEv" type="button" hidden title="複製這個行程到其他日期">複製</button>
+      <button class="btn btn-danger" id="deleteEvBtn" hidden>刪除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 複製到其他日期 Modal -->
+<div class="modal-overlay" id="copyModal">
+  <div class="modal modal-narrow">
+    <h2>複製到哪一天？</h2>
+    <p id="copyInfo" class="move-ask"></p>
+    <div class="form-group mt-10">
+      <label for="copyTarget">新的開始日（天數與時間不變）</label>
+      <input type="date" id="copyTarget" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnConfirmCopy">複製</button>
+      <button class="btn btn-ghost" id="btnCancelCopy">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 類別管理 Modal -->
+<div class="modal-overlay" id="catModal">
+  <div class="modal modal-wide">
+    <h2>行程類別</h2>
+    <div class="hint hint-lead">為每種類別設定固定顏色（單色或漸層）。在行程裡選擇類別就會套用；之後仍可在行程裡改色，也不會影響已建立的行程。</div>
+    <div id="catList"></div>
+    <button class="btn btn-ghost" type="button" id="btnAddCat">＋ 新增類別</button>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnCloseCat">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 發現重複：確認是否覆蓋、顯示差異 -->
+<div class="modal-overlay" id="dupModal">
+  <div class="modal modal-wide">
+    <h2>⚠ 有重複的行程</h2>
+    <div class="hint hint-lead" id="dupIntro"></div>
+    <div class="exp-tools">
+      <button class="color-tab small" type="button" id="dupAll">全部覆蓋</button>
+      <button class="color-tab small" type="button" id="dupNone">全部略過</button>
+      <span class="exp-count" id="dupCount"></span>
+    </div>
+    <div class="dup-list" id="dupList"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="dupDo" type="button">套用</button>
+      <button class="btn btn-ghost" id="dupCancel" type="button">取消匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 直播行程：選擇行程 Modal -->
+<div class="modal-overlay" id="streamPickModal">
+  <div class="modal modal-wide">
+    <h2>📥 從私人行程匯入到直播行程</h2>
+    <div class="hint hint-lead">勾選的行程會「複製」一份到直播行程，之後兩邊各改各的（在直播行程改標題、時間、顏色，不會動到私人行程原本的內容）。直播行程裡已經有同一筆（匯入過的，或同一天、同標題的）時，不會再複製一份，而是列出兩邊的差異問你要不要覆蓋。</div>
+    <div class="hint" id="spScope"></div>
+    <div class="exp-tools">
+      <button class="color-tab small" type="button" id="spAll">全選</button>
+      <button class="color-tab small" type="button" id="spNone">全不選</button>
+      <span class="exp-count" id="spCount"></span>
+    </div>
+    <div class="cat-chips" id="spCats"></div>
+    <div class="exp-list" id="spList"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="spDo">匯入</button>
+      <button class="btn btn-ghost" id="spCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 匯出行程 Modal -->
+<div class="modal-overlay" id="exportModal">
+  <div class="modal modal-wide">
+    <h2>📤 匯出行程</h2>
+    <div class="hint hint-lead">取消勾選的行程不會寫進匯出檔（類別設定與系統紀錄一律會一起匯出）。</div>
+    <div class="exp-tools">
+      <button class="color-tab small" type="button" id="expAll">全選</button>
+      <button class="color-tab small" type="button" id="expNone">全不選</button>
+      <span class="exp-count" id="expCount"></span>
+    </div>
+    <div class="cat-chips" id="expCats"></div>
+    <div class="exp-list" id="expList"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnDoExport">匯出</button>
+      <button class="btn btn-ghost" id="btnCancelExport">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 移動／複製 Modal -->
+<!-- 當天行程清單 Modal -->
+<div class="modal-overlay" id="dayModal">
+  <div class="modal modal-narrow">
+    <h2 id="dayListTitle"></h2>
+    <div id="dayListBody" class="day-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCloseDay">關閉</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="moveModal">
+  <div class="modal modal-narrow">
+    <h2>要移動還是複製？</h2>
+    <p id="moveAskText" class="move-ask"></p>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnMoveDo">移動</button>
+      <button class="btn btn-ghost" id="btnCopyDo">複製</button>
+      <button class="btn btn-ghost" id="btnMoveCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 背景 Modal -->
+<div class="modal-overlay" id="bgModal">
+  <div class="modal">
+    <h2>背景・顏色設定</h2>
+    <div class="form-group">
+      <label>背景類型</label>
+      <div class="color-mode-tabs">
+        <button class="color-tab active" id="bgTabGradient" type="button">漸層</button>
+        <button class="color-tab" id="bgTabPattern" type="button">圖樣</button>
+        <button class="color-tab" id="bgTabImage" type="button">圖片</button>
+      </div>
+
+      <div id="bgPaneGradient">
+        <div class="color-row" id="bgColorRow">
+          <div class="bg-stop"><input type="color" class="bgc" value="#fff5f8" /><span>①</span></div>
+          <div class="bg-stop"><input type="color" class="bgc" value="#fde7ee" /><span>②</span></div>
+          <div class="bg-stop"><input type="color" class="bgc" value="#fbd5e1" /><span>③</span></div>
+        </div>
+        <div class="angle-row">
+          <span>角度</span>
+          <input type="range" id="bgAngle" min="0" max="360" value="135" />
+          <span id="bgAngleVal">135°</span>
+        </div>
+      </div>
+
+      <div id="bgPanePattern" hidden>
+        <div class="pattern-grid" id="patternGrid"></div>
+        <div class="swatch-row">
+          <div class="color-swatch-wrap"><input type="color" id="patBase" value="#fff5f8" /><label>底色</label></div>
+          <div class="color-swatch-wrap"><input type="color" id="patColor" value="#f08aa8" /><label>圖樣顏色</label></div>
+        </div>
+        <div class="angle-row mt-8">
+          <span>大小</span>
+          <input type="range" id="patSize" min="16" max="96" value="36" />
+          <span id="patSizeVal">36px</span>
+        </div>
+        <div class="angle-row mt-4">
+          <span>濃度</span>
+          <input type="range" id="patAlpha" min="10" max="100" value="45" />
+          <span id="patAlphaVal">45%</span>
+        </div>
+      </div>
+
+      <div id="bgPaneImage" hidden>
+        <input type="file" id="bgImageFile" accept="image/*" hidden />
+        <button class="btn btn-ghost btn-block" id="btnPickImg" type="button">🖼 選擇圖片</button>
+        <div class="angle-row mt-10">
+          <span>淡化</span>
+          <input type="range" id="imgFade" min="0" max="90" value="50" />
+          <span id="imgFadeVal">50%</span>
+        </div>
+        <div class="fd-mode-tabs tabs-flush">
+          <button class="fd-mode-tab active" id="imgFitCover" type="button">填滿整體</button>
+          <button class="fd-mode-tab" id="imgFitTile" type="button">平鋪</button>
+        </div>
+        <div class="hint">會疊上一層白色，讓內容更易讀。圖片只會儲存在這個瀏覽器中。</div>
+      </div>
+
+      <div class="bg-preview-bar" id="bgPreviewBar"></div>
+    </div>
+    <div class="form-group">
+      <label class="label-row">
+        <span>文字色・邊框色</span>
+        <button class="color-tab small active" id="btnAutoColors" type="button">✨ 依背景自動設定</button>
+      </label>
+      <div class="swatch-row swatch-wrap">
+        <div class="color-swatch-wrap"><input type="color" id="calTextColor" value="#4a3b42" /><label>主要文字</label></div>
+        <div class="color-swatch-wrap"><input type="color" id="calMutedColor" value="#8a7881" /><label>次要文字</label></div>
+        <div class="color-swatch-wrap"><input type="color" id="calBorderColor" value="#f3d3dd" /><label>邊框</label></div>
+        <div class="color-swatch-wrap"><input type="color" id="calCardBgColor" value="#ffffff" /><label>卡片背景</label></div>
+      </div>
+      <div class="angle-row mt-8">
+        <span>卡片透明度</span>
+        <input type="range" id="calCardAlpha" min="0" max="100" value="82" />
+        <span id="calCardAlphaVal">82%</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnApplyBg">套用</button>
+      <button class="btn btn-ghost" id="btnCancelBg">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 空檔日期 Modal -->
+<div class="modal-overlay" id="freeDaysModal">
+  <div class="modal">
+    <h2>📋 輸出空檔日期</h2>
+
+    <div class="fd-mode-tabs">
+      <button class="fd-mode-tab active" id="fdMode1" type="button">僅本月</button>
+      <button class="fd-mode-tab" id="fdMode2" type="button">選擇多個月份</button>
+    </div>
+
+    <div class="form-group" id="fdMultiMonths" hidden>
+      <label>選擇月份</label>
+      <div class="month-check-grid" id="fdMonthGrid"></div>
+    </div>
+
+    <div class="form-group">
+      <label>有空時段的計算範圍（只列出此範圍內的空檔；沒限定就是整天）</label>
+      <div class="time-row">
+        <select id="fdWinStart" aria-label="範圍開始"></select>
+        <span>～</span>
+        <select id="fdWinEnd" aria-label="範圍結束"></select>
+      </div>
+      <div class="hint">格式：整天沒行程且沒限定範圍只列日期，如 7/23(四)；限定了範圍（例：20:30～24）就列出範圍，如 7/23(四) 20:30~24；有行程則列扣除後的空檔，如 7/24(五) 18~21（30 分為單位）。</div>
+    </div>
+
+    <div class="form-group">
+      <label>排除的星期（點擊排除）</label>
+      <div class="dow-toggle-row" id="fdDowRow"></div>
+      <label class="check-line">
+        <input type="checkbox" id="fdExclHoliday" />
+        <span>同時排除國定假日</span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label>排除的日期（在日曆上點選）</label>
+      <div class="excl-tags" id="exclTags"></div>
+      <div class="excl-cal-wrap">
+        <div class="excl-cal-header">
+          <button class="excl-cal-nav" id="exclPrev" type="button">‹</button>
+          <span id="exclCalTitle"></span>
+          <button class="excl-cal-nav" id="exclNext" type="button">›</button>
+        </div>
+        <div class="excl-mini-cal" id="exclMiniCal"></div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>輸出結果</label>
+      <textarea class="free-output" id="freeDaysOutput" readonly placeholder="確認上方設定後，按「產生」"></textarea>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnGenFree">✨ 產生</button>
+        <button class="btn btn-ghost" id="btnCopyFree">📋 複製</button>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>用外部服務協調時間</label>
+      <div class="external-links">
+        <a class="ext-btn" href="https://www.when2meet.com/" target="_blank" rel="noopener">🗓 When2meet</a>
+        <a class="ext-btn" href="https://doodle.com/" target="_blank" rel="noopener">📊 Doodle</a>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnCloseFree">關閉</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/state.js"></script>
+<script src="js/holidays.js"></script>
+<script src="js/events.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/picker.js"></script>
+<script src="js/tools.js"></script>
+<script src="js/stream.js"></script>
+<script src="js/streamlog.js"></script>
+<script src="js/stream-settings.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
